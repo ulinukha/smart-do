@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SmartDo</string>
+
+    <!-- Device Admin -->
+    <string name="admin_description">SmartDo Device Admin for Android TV Control</string>
+    <string name="device_admin_enabled">Device Admin Enabled</string>
+    <string name="device_admin_disabled">Device Admin Disabled</string>
+
+    <!-- Admin Actions -->
+    <string name="enable_admin">Enable Device Admin</string>
+    <string name="disable_admin">Disable Device Admin</string>
+    <string name="lock_device">Lock Device</string>
+    <string name="reboot_device">Reboot Device</string>
+    <string name="wipe_device">Wipe Device</string>
+
+    <!-- Kiosk Mode -->
+    <string name="kiosk_mode">Kiosk Mode</string>
+    <string name="enable_kiosk">Enable Kiosk Mode</string>
+    <string name="disable_kiosk">Disable Kiosk Mode</string>
+
+    <!-- UI Controls -->
+    <string name="disable_status_bar">Disable Status Bar</string>
+    <string name="enable_status_bar">Enable Status Bar</string>
+    <string name="disable_keyguard">Disable Lock Screen</string>
+    <string name="enable_keyguard">Enable Lock Screen</string>
+
+    <!-- Status -->
+    <string name="status_admin_active">Device Admin: Active</string>
+    <string name="status_admin_inactive">Device Admin: Inactive</string>
+    <string name="status_owner_active">Device Owner: Active</string>
+    <string name="status_owner_inactive">Device Owner: Inactive</string>
+
+    <!-- Messages -->
+    <string name="admin_control_title">SmartDo Admin Control</string>
+    <string name="admin_controls">Admin Controls</string>
+    <string name="device_owner_controls">Device Owner Controls</string>
+    <string name="enable_admin_message">Enable Device Admin to unlock features</string>
+
+    <!-- Device Owner Setup -->
+    <string name="device_owner_setup_title">Device Owner Setup Required</string>
+    <string name="device_owner_setup_message">To unlock Device Owner features:\n\nRun via ADB:\nadb shell dpm set-device-owner smart.smartdo/.admin.SmartDoDeviceAdminReceiver</string>
+
+    <!-- Broadcast Actions -->
+    <string name="broadcast_sent">Broadcast Sent</string>
+    <string name="broadcast_received">Broadcast Received</string>
+</resources>

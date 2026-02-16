@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base application theme for SmartDo -->
+    <style name="Theme.SmartDo" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Primary brand color -->
+        <item name="android:colorPrimary">#0061A4</item>
+        <item name="android:colorPrimaryDark">#00497D</item>
+        <item name="android:colorAccent">#9ECAFF</item>
+
+        <!-- Status bar color -->
+        <item name="android:statusBarColor">#0061A4</item>
+
+        <!-- Background colors -->
+        <item name="android:windowBackground">@android:color/white</item>
+
+        <!-- For Android TV -->
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <!-- Dark theme variant -->
+    <style name="Theme.SmartDo.Dark" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">#9ECAFF</item>
+        <item name="android:colorPrimaryDark">#00497D</item>
+        <item name="android:colorAccent">#D1E4FF</item>
+        <item name="android:statusBarColor">#1A1C1E</item>
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>
