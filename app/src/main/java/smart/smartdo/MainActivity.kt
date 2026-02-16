@@ -10,6 +10,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,8 +31,6 @@ import smart.smartdo.ui.theme.SmartDoTheme
 class MainActivity : ComponentActivity() {
 
     private lateinit var deviceAdminManager: DeviceAdminManager
-
-    // State untuk trigger refresh UI
     private var refreshTrigger = mutableIntStateOf(0)
 
     private val internalReceiver = object : BroadcastReceiver() {
@@ -45,6 +44,7 @@ class MainActivity : ComponentActivity() {
                 "HIDE_APP" -> data?.let { deviceAdminManager.setApplicationHidden(it, true) }
                 "SHOW_APP" -> data?.let { deviceAdminManager.setApplicationHidden(it, false) }
                 "TOGGLE_KIOSK" -> toggleKioskMode(data == "true")
+                "CLEAR_APP_DATA" -> data?.let { clearAppData(it) }
             }
         }
     }
@@ -66,7 +66,7 @@ class MainActivity : ComponentActivity() {
 
         deviceAdminManager = DeviceAdminManager(this)
 
-        // DEBUG: Test component name immediately
+        // DEBUG: Test component name
         debugComponentName()
 
         // Register internal broadcast receiver
@@ -90,7 +90,8 @@ class MainActivity : ComponentActivity() {
                     onReboot = { deviceAdminManager.rebootDevice() },
                     onToggleKiosk = { enabled -> toggleKioskMode(enabled) },
                     onDisableStatusBar = { deviceAdminManager.setStatusBarDisabled(it) },
-                    onDisableKeyguard = { deviceAdminManager.setKeyguardDisabled(it) }
+                    onDisableKeyguard = { deviceAdminManager.setKeyguardDisabled(it) },
+                    onClearAppData = { packageName -> clearAppData(packageName) }
                 )
             }
         }
@@ -103,20 +104,31 @@ class MainActivity : ComponentActivity() {
         Log.e("TEST", "=================================")
         Log.e("TEST", "Package: ${packageName}")
         Log.e("TEST", "Component: ${component.flattenToString()}")
-        Log.e("TEST", "Component pkg: ${component.packageName}")
-        Log.e("TEST", "Component class: ${component.className}")
         Log.e("TEST", "Is Active: ${dpm.isAdminActive(component)}")
 
-        // Check all active admins
         val admins = dpm.activeAdmins
         Log.e("TEST", "Active admins count: ${admins?.size ?: 0}")
         admins?.forEach {
             Log.e("TEST", "  Admin: ${it.flattenToString()}")
-            Log.e("TEST", "    Package: ${it.packageName}")
-            Log.e("TEST", "    Class: ${it.className}")
             Log.e("TEST", "    Match: ${it == component}")
         }
         Log.e("TEST", "=================================")
+    }
+
+    private fun clearAppData(packageName: String) {
+        if (deviceAdminManager.isDeviceOwner()) {
+            val success = deviceAdminManager.clearApplicationData(packageName)
+            val message = if (success) {
+                "Clearing data for $packageName..."
+            } else {
+                "Failed to clear data for $packageName"
+            }
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+            Log.d(TAG, message)
+        } else {
+            Toast.makeText(this, "Device Owner required to clear app data", Toast.LENGTH_SHORT).show()
+            Log.w(TAG, "Cannot clear app data - not a device owner")
+        }
     }
 
     override fun onResume() {
@@ -204,19 +216,63 @@ fun TVAdminScreen(
     onReboot: () -> Unit,
     onToggleKiosk: (Boolean) -> Unit,
     onDisableStatusBar: (Boolean) -> Unit,
-    onDisableKeyguard: (Boolean) -> Unit
+    onDisableKeyguard: (Boolean) -> Unit,
+    onClearAppData: (String) -> Unit
 ) {
     var isAdminActive by remember { mutableStateOf(deviceAdminManager.isDeviceAdmin()) }
     var isDeviceOwner by remember { mutableStateOf(deviceAdminManager.isDeviceOwner()) }
     var kioskModeEnabled by remember { mutableStateOf(false) }
     var statusBarDisabled by remember { mutableStateOf(false) }
     var keyguardDisabled by remember { mutableStateOf(false) }
+    var showClearDataDialog by remember { mutableStateOf(false) }
+    var packageToClear by remember { mutableStateOf("") }
 
     LaunchedEffect(refreshTrigger) {
         Log.d("TVAdminScreen", "LaunchedEffect triggered with refreshTrigger=$refreshTrigger")
         isAdminActive = deviceAdminManager.isDeviceAdmin()
         isDeviceOwner = deviceAdminManager.isDeviceOwner()
         Log.d("TVAdminScreen", "Status updated - Admin: $isAdminActive, Owner: $isDeviceOwner")
+    }
+
+    // Clear Data Dialog
+    if (showClearDataDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDataDialog = false },
+            title = { Text("Clear App Data") },
+            text = {
+                Column {
+                    Text("Enter package name to clear data:")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = packageToClear,
+                        onValueChange = { packageToClear = it },
+                        placeholder = { Text("e.g. com.example.app") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (packageToClear.isNotBlank()) {
+                            onClearAppData(packageToClear)
+                            showClearDataDialog = false
+                            packageToClear = ""
+                        }
+                    }
+                ) {
+                    Text("Clear Data")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showClearDataDialog = false
+                    packageToClear = ""
+                }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     Surface(
@@ -273,12 +329,6 @@ fun TVAdminScreen(
                         ) {
                             Text("Enable Device Admin")
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "Debug: refreshTrigger=$refreshTrigger",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }
@@ -315,6 +365,17 @@ fun TVAdminScreen(
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.SemiBold
                     )
+
+                    // Clear App Data Button
+                    Button(
+                        onClick = { showClearDataDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text("Clear App Data")
+                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),

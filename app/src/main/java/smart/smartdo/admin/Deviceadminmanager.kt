@@ -200,6 +200,50 @@ class DeviceAdminManager(private val context: Context) {
         }
     }
 
+    /**
+     * Clear application data (requires Device Owner)
+     * @param packageName Package name of the app to clear data
+     * @return true if operation started successfully
+     */
+    fun clearApplicationData(packageName: String): Boolean {
+        return if (isDeviceOwner()) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                    Log.d(TAG, "Attempting to clear data for: $packageName")
+                    val executor = context.mainExecutor
+
+                    // Callback listener untuk hasil operasi
+                    val listener = object : DevicePolicyManager.OnClearApplicationUserDataListener {
+                        override fun onApplicationUserDataCleared(packageName: String, succeeded: Boolean) {
+                            if (succeeded) {
+                                Log.d(TAG, "Successfully cleared data for: $packageName")
+                            } else {
+                                Log.e(TAG, "Failed to clear data for: $packageName")
+                            }
+                        }
+                    }
+
+                    devicePolicyManager.clearApplicationUserData(
+                        adminComponent,
+                        packageName,
+                        executor, // executor (null = main thread)
+                        listener
+                    )
+                    Log.d(TAG, "Clear data operation initiated for: $packageName")
+                    true // Operation started successfully
+                } else {
+                    Log.w(TAG, "clearApplicationUserData not supported on this API level")
+                    false
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to clear application data for $packageName", e)
+                false
+            }
+        } else {
+            Log.w(TAG, "Cannot clear application data - not a device owner")
+            false
+        }
+    }
     companion object {
         private const val TAG = "DeviceAdminManager"
     }
