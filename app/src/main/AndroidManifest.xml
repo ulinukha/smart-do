@@ -26,6 +26,13 @@
         android:name="android.hardware.touchscreen"
         android:required="false" />
 
+    <queries>
+        <package android:name="com.smartiv.hospitality" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:banner="@drawable/app_banner"
@@ -54,17 +61,13 @@
             android:name=".admin.SmartDoDeviceAdminReceiver"
             android:exported="true"
             android:permission="android.permission.BIND_DEVICE_ADMIN"
-            android:directBootAware="false">
-
-            <!-- Meta-data MUST come before intent-filter -->
+            android:directBootAware="true">
             <meta-data
                 android:name="android.app.device_admin"
                 android:resource="@xml/device_admin_policies" />
-
-            <!-- Intent filter for Device Admin -->
-            <intent-filter>
+            <intent-filter android:priority="1000">
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-                <action android:name="android.app.action.DEVICE_ADMIN_DISABLED" />
+                <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
             </intent-filter>
         </receiver>
 
@@ -82,7 +85,8 @@
         <!-- Broadcast Receiver -->
         <receiver
             android:name=".receiver.CustomBroadcastReceiver"
-            android:exported="true">
+            android:exported="true"
+            android:directBootAware="true">
             <intent-filter>
                 <action android:name="smart.smartdo.ACTION_COMMAND" />
                 <action android:name="smart.smartdo.ACTION_STATUS" />

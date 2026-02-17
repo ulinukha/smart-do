@@ -1,16 +1,14 @@
 package smart.smartdo
 
 import android.app.Activity
-import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import android.os.UserManager
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -31,12 +29,17 @@ import smart.smartdo.ui.theme.SmartDoTheme
 class MainActivity : ComponentActivity() {
 
     private lateinit var deviceAdminManager: DeviceAdminManager
-    private var refreshTrigger = mutableIntStateOf(0)
+    private val refreshTrigger = mutableIntStateOf(0)
 
+    /**
+     * Receiver Internal untuk menangani aksi dari CustomBroadcastReceiver (App Hospitality)
+     */
     private val internalReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val action = intent.getStringExtra("internal_action")
             val data = intent.getStringExtra("data")
+
+            Log.d(TAG, "Internal action received: $action with data: $data")
 
             when (action) {
                 "LOCK_DEVICE" -> deviceAdminManager.lockDevice()
@@ -44,7 +47,6 @@ class MainActivity : ComponentActivity() {
                 "HIDE_APP" -> data?.let { deviceAdminManager.setApplicationHidden(it, true) }
                 "SHOW_APP" -> data?.let { deviceAdminManager.setApplicationHidden(it, false) }
                 "TOGGLE_KIOSK" -> toggleKioskMode(data == "true")
-                "CLEAR_APP_DATA" -> data?.let { clearAppData(it) }
             }
         }
     }
@@ -66,74 +68,82 @@ class MainActivity : ComponentActivity() {
 
         deviceAdminManager = DeviceAdminManager(this)
 
-        // DEBUG: Test component name
-        debugComponentName()
-
-        // Register internal broadcast receiver
         val filter = IntentFilter("smart.smartdo.INTERNAL_ACTION")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(internalReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            registerReceiver(internalReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        val receiverFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Context.RECEIVER_EXPORTED
         } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            registerReceiver(internalReceiver, filter)
+            0
         }
+        registerReceiver(internalReceiver, filter, receiverFlags)
+
+        applyDeviceOwnerRestrictions()
 
         setContent {
             SmartDoTheme {
                 TVAdminScreen(
                     deviceAdminManager = deviceAdminManager,
-                    refreshTrigger = refreshTrigger.value,
+                    refreshTrigger = refreshTrigger.intValue,
                     onEnableAdmin = { enableDeviceAdmin() },
                     onLockDevice = { deviceAdminManager.lockDevice() },
                     onReboot = { deviceAdminManager.rebootDevice() },
                     onToggleKiosk = { enabled -> toggleKioskMode(enabled) },
                     onDisableStatusBar = { deviceAdminManager.setStatusBarDisabled(it) },
-                    onDisableKeyguard = { deviceAdminManager.setKeyguardDisabled(it) },
-                    onClearAppData = { packageName -> clearAppData(packageName) }
+                    onDisableKeyguard = { deviceAdminManager.setKeyguardDisabled(it) }
                 )
             }
         }
     }
 
-    private fun debugComponentName() {
-        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        val component = ComponentName(this, SmartDoDeviceAdminReceiver::class.java)
+    /**
+     * Menerapkan pembatasan sistem agar TV tidak bisa di-reset manual oleh tamu
+     */
+    private fun applyDeviceOwnerRestrictions() {
+        if (deviceAdminManager.isDeviceOwner()) {
+            val adminComponent = SmartDoDeviceAdminReceiver.getComponentName(this)
 
-        Log.e("TEST", "=================================")
-        Log.e("TEST", "Package: ${packageName}")
-        Log.e("TEST", "Component: ${component.flattenToString()}")
-        Log.e("TEST", "Is Active: ${dpm.isAdminActive(component)}")
+            deviceAdminManager.addUserRestriction(UserManager.DISALLOW_FACTORY_RESET)
+            deviceAdminManager.removeUserRestriction(UserManager.DISALLOW_MODIFY_ACCOUNTS)
 
-        val admins = dpm.activeAdmins
-        Log.e("TEST", "Active admins count: ${admins?.size ?: 0}")
-        admins?.forEach {
-            Log.e("TEST", "  Admin: ${it.flattenToString()}")
-            Log.e("TEST", "    Match: ${it == component}")
+            Log.d(TAG, "Device Owner security restrictions applied.")
         }
-        Log.e("TEST", "=================================")
     }
 
-    private fun clearAppData(packageName: String) {
-        if (deviceAdminManager.isDeviceOwner()) {
-            val success = deviceAdminManager.clearApplicationData(packageName)
-            val message = if (success) {
-                "Clearing data for $packageName..."
-            } else {
-                "Failed to clear data for $packageName"
+    private fun enableDeviceAdmin() {
+        if (!deviceAdminManager.isDeviceAdmin()) {
+            enableAdminLauncher.launch(deviceAdminManager.getEnableAdminIntent())
+        }
+    }
+
+    private fun refreshAdminStatus() {
+        lifecycleScope.launch {
+            delay(300)
+            refreshTrigger.intValue++
+        }
+    }
+
+    private fun refreshAdminStatusWithRetry() {
+        lifecycleScope.launch {
+            repeat(5) {
+                delay(500)
+                refreshTrigger.intValue++
+                if (deviceAdminManager.isDeviceAdmin()) return@launch
             }
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-            Log.d(TAG, message)
+        }
+    }
+
+    private fun toggleKioskMode(enable: Boolean) {
+        if (enable) {
+            // Daftarkan package ini dan Hospitality agar bisa masuk mode Kiosk
+            val packages = arrayOf(packageName, "com.smartiv.hospitality")
+            deviceAdminManager.setLockTaskPackages(packages)
+            startLockTask()
         } else {
-            Toast.makeText(this, "Device Owner required to clear app data", Toast.LENGTH_SHORT).show()
-            Log.w(TAG, "Cannot clear app data - not a device owner")
+            stopLockTask()
         }
     }
 
     override fun onResume() {
         super.onResume()
-        Log.d(TAG, "onResume called")
         refreshAdminStatus()
     }
 
@@ -141,72 +151,19 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         try {
             unregisterReceiver(internalReceiver)
-        } catch (e: IllegalArgumentException) {
-            Log.w(TAG, "Receiver already unregistered", e)
-        }
-    }
-
-    private fun enableDeviceAdmin() {
-        if (!deviceAdminManager.isDeviceAdmin()) {
-            Log.d(TAG, "Launching enable admin intent")
-            enableAdminLauncher.launch(deviceAdminManager.getEnableAdminIntent())
-        } else {
-            Log.d(TAG, "Device admin already enabled")
-        }
-    }
-
-    private fun refreshAdminStatus() {
-        lifecycleScope.launch {
-            delay(300)
-            refreshTrigger.value++
-            val isAdmin = deviceAdminManager.isDeviceAdmin()
-            val isOwner = deviceAdminManager.isDeviceOwner()
-            Log.d(TAG, "Admin status refreshed: Admin=$isAdmin, Owner=$isOwner")
-        }
-    }
-
-    private fun refreshAdminStatusWithRetry() {
-        lifecycleScope.launch {
-            var attempts = 0
-            val maxAttempts = 5
-
-            while (attempts < maxAttempts) {
-                delay(500)
-                attempts++
-
-                val isAdmin = deviceAdminManager.isDeviceAdmin()
-                val isOwner = deviceAdminManager.isDeviceOwner()
-
-                Log.d(TAG, "Retry $attempts/$maxAttempts - Admin=$isAdmin, Owner=$isOwner")
-
-                if (isAdmin) {
-                    refreshTrigger.value++
-                    Log.d(TAG, "Admin status confirmed active after $attempts attempts")
-                    break
-                }
-
-                if (attempts == maxAttempts) {
-                    refreshTrigger.value++
-                    Log.w(TAG, "Admin status still inactive after $maxAttempts attempts")
-                }
-            }
-        }
-    }
-
-    private fun toggleKioskMode(enable: Boolean) {
-        if (enable) {
-            deviceAdminManager.setLockTaskPackages(arrayOf(packageName))
-            startLockTask()
-        } else {
-            stopLockTask()
+        } catch (e: Exception) {
+            Log.w(TAG, "Receiver already unregistered")
         }
     }
 
     companion object {
-        private const val TAG = "MainActivity"
+        private const val TAG = "SmartDo_Main"
     }
 }
 
+/**
+ * UI Komponen menggunakan Jetpack Compose untuk Android TV
+ */
 @Composable
 fun TVAdminScreen(
     deviceAdminManager: DeviceAdminManager,
@@ -216,63 +173,19 @@ fun TVAdminScreen(
     onReboot: () -> Unit,
     onToggleKiosk: (Boolean) -> Unit,
     onDisableStatusBar: (Boolean) -> Unit,
-    onDisableKeyguard: (Boolean) -> Unit,
-    onClearAppData: (String) -> Unit
+    onDisableKeyguard: (Boolean) -> Unit
 ) {
-    var isAdminActive by remember { mutableStateOf(deviceAdminManager.isDeviceAdmin()) }
-    var isDeviceOwner by remember { mutableStateOf(deviceAdminManager.isDeviceOwner()) }
-    var kioskModeEnabled by remember { mutableStateOf(false) }
+    var isAdminActive by remember { mutableStateOf(false) }
+    var isDeviceOwner by remember { mutableStateOf(false) }
+
+    // UI State Switches
+    var kioskEnabled by remember { mutableStateOf(false) }
     var statusBarDisabled by remember { mutableStateOf(false) }
     var keyguardDisabled by remember { mutableStateOf(false) }
-    var showClearDataDialog by remember { mutableStateOf(false) }
-    var packageToClear by remember { mutableStateOf("") }
 
     LaunchedEffect(refreshTrigger) {
-        Log.d("TVAdminScreen", "LaunchedEffect triggered with refreshTrigger=$refreshTrigger")
         isAdminActive = deviceAdminManager.isDeviceAdmin()
         isDeviceOwner = deviceAdminManager.isDeviceOwner()
-        Log.d("TVAdminScreen", "Status updated - Admin: $isAdminActive, Owner: $isDeviceOwner")
-    }
-
-    // Clear Data Dialog
-    if (showClearDataDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearDataDialog = false },
-            title = { Text("Clear App Data") },
-            text = {
-                Column {
-                    Text("Enter package name to clear data:")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = packageToClear,
-                        onValueChange = { packageToClear = it },
-                        placeholder = { Text("e.g. com.example.app") },
-                        singleLine = true
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (packageToClear.isNotBlank()) {
-                            onClearAppData(packageToClear)
-                            showClearDataDialog = false
-                            packageToClear = ""
-                        }
-                    }
-                ) {
-                    Text("Clear Data")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showClearDataDialog = false
-                    packageToClear = ""
-                }) {
-                    Text("Cancel")
-                }
-            }
-        )
     }
 
     Surface(
@@ -282,166 +195,55 @@ fun TVAdminScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(48.dp),
+                .padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                text = "SmartDo Admin Control",
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold
-            )
+            Text("Smart DO (Device Owner) Controller", style = MaterialTheme.typography.headlineMedium)
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                StatusCard(
-                    title = "Device Admin",
-                    status = isAdminActive,
-                    modifier = Modifier.weight(1f)
-                )
-                StatusCard(
-                    title = "Device Owner",
-                    status = isDeviceOwner,
-                    modifier = Modifier.weight(1f)
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                StatusCard("Admin Status", isAdminActive)
+                StatusCard("Owner Status", isDeviceOwner)
             }
 
-            HorizontalDivider()
+            Divider(modifier = Modifier.padding(vertical = 8.dp))
 
             if (!isAdminActive) {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = "Enable Device Admin to unlock features",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(
-                            onClick = onEnableAdmin,
-                            modifier = Modifier.fillMaxWidth(0.5f)
-                        ) {
-                            Text("Enable Device Admin")
-                        }
-                    }
+                Button(onClick = onEnableAdmin, modifier = Modifier.fillMaxWidth(0.6f)) {
+                    Text("Enable Device Admin")
                 }
-            }
-
-            if (isAdminActive) {
-                Text(
-                    text = "Admin Controls",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Button(
-                        onClick = onLockDevice,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Lock Device")
-                    }
-                    Button(
-                        onClick = onReboot,
-                        enabled = isDeviceOwner,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Reboot")
-                    }
+            } else {
+                // Controls Group
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(onClick = onLockDevice) { Text("Lock TV") }
+                    Button(onClick = onReboot, enabled = isDeviceOwner) { Text("Reboot TV") }
                 }
 
                 if (isDeviceOwner) {
-                    Text(
-                        text = "Device Owner Controls",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Card(modifier = Modifier.fillMaxWidth(0.8f)) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Advanced Policy (Owner Only)", fontWeight = FontWeight.Bold)
 
-                    // Clear App Data Button
-                    Button(
-                        onClick = { showClearDataDialog = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error
-                        )
-                    ) {
-                        Text("Clear App Data")
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Kiosk Mode", style = MaterialTheme.typography.bodyLarge)
-                        Switch(
-                            checked = kioskModeEnabled,
-                            onCheckedChange = {
-                                kioskModeEnabled = it
+                            ControlRow("Kiosk Mode", kioskEnabled) {
+                                kioskEnabled = it
                                 onToggleKiosk(it)
                             }
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Disable Status Bar", style = MaterialTheme.typography.bodyLarge)
-                        Switch(
-                            checked = statusBarDisabled,
-                            onCheckedChange = {
+                            ControlRow("Disable Status Bar", statusBarDisabled) {
                                 statusBarDisabled = it
                                 onDisableStatusBar(it)
                             }
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Disable Lock Screen", style = MaterialTheme.typography.bodyLarge)
-                        Switch(
-                            checked = keyguardDisabled,
-                            onCheckedChange = {
+                            ControlRow("Disable Keyguard", keyguardDisabled) {
                                 keyguardDisabled = it
                                 onDisableKeyguard(it)
                             }
-                        )
-                    }
-                } else {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer
-                        )
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "💡 To unlock Device Owner features:",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "Run via ADB:\nadb shell dpm set-device-owner smart.smartdo/.admin.SmartDoDeviceAdminReceiver",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                            )
                         }
                     }
+                } else {
+                    Text(
+                        "Please run ADB command to promote to Device Owner",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
         }
@@ -449,35 +251,27 @@ fun TVAdminScreen(
 }
 
 @Composable
-fun StatusCard(
-    title: String,
-    status: Boolean,
-    modifier: Modifier = Modifier
-) {
+fun ControlRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label)
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+fun StatusCard(label: String, isActive: Boolean) {
     Card(
-        modifier = modifier,
         colors = CardDefaults.cardColors(
-            containerColor = if (status) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.errorContainer
-            }
+            containerColor = if (isActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer
         )
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = if (status) "✓ Active" else "✗ Inactive",
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Bold
-            )
+        Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(label, style = MaterialTheme.typography.labelSmall)
+            Text(if (isActive) "ACTIVE" else "INACTIVE", fontWeight = FontWeight.ExtraBold)
         }
     }
 }

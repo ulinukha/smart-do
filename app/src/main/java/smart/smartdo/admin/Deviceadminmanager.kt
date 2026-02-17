@@ -212,25 +212,24 @@ class DeviceAdminManager(private val context: Context) {
                     Log.d(TAG, "Attempting to clear data for: $packageName")
                     val executor = context.mainExecutor
 
-                    // Callback listener untuk hasil operasi
-                    val listener = object : DevicePolicyManager.OnClearApplicationUserDataListener {
-                        override fun onApplicationUserDataCleared(packageName: String, succeeded: Boolean) {
+
+                    val listener =
+                        DevicePolicyManager.OnClearApplicationUserDataListener { packageName, succeeded ->
                             if (succeeded) {
                                 Log.d(TAG, "Successfully cleared data for: $packageName")
                             } else {
                                 Log.e(TAG, "Failed to clear data for: $packageName")
                             }
                         }
-                    }
 
                     devicePolicyManager.clearApplicationUserData(
                         adminComponent,
                         packageName,
-                        executor, // executor (null = main thread)
+                        executor,
                         listener
                     )
                     Log.d(TAG, "Clear data operation initiated for: $packageName")
-                    true // Operation started successfully
+                    true
                 } else {
                     Log.w(TAG, "clearApplicationUserData not supported on this API level")
                     false
